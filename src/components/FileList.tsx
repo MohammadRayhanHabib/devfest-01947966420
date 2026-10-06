@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Dict } from '../lib/i18n'
+import { toBn, type Dict } from '../lib/i18n'
 import type { Lang, UploadedFile } from '../types'
 import { IconAlert, IconFiles, IconX } from './icons'
 
@@ -28,10 +28,12 @@ interface Props {
 
 const kb = (n: number) => (n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
 
-export default function FileList({ t, rows, rejected, onRemove, onClearRejected }: Props) {
-  // Long lists start collapsed; the user can show or hide them at any time.
-  const [open, setOpen] = useState<boolean | null>(null)
-  const isOpen = open ?? rows.length <= 6
+const PREVIEW = 3 // files always visible; the rest sit behind "Show all"
+
+export default function FileList({ t, lang, rows, rejected, onRemove, onClearRejected }: Props) {
+  const [open, setOpen] = useState(false)
+  const isOpen = open || rows.length <= PREVIEW
+  const visible = isOpen ? rows : rows.slice(0, PREVIEW)
   const dupCount = rows.filter((r) => r.duplicateOf).length
   // Re-adding the very same file isn't an error: show one quiet line instead of a red list.
   const alreadyCount = rejected.filter((r) => r.reason === 'alreadyAdded').length
@@ -78,22 +80,22 @@ export default function FileList({ t, rows, rejected, onRemove, onClearRejected 
               </span>
             )}
           </p>
-          {rows.length > 0 && (
+          {rows.length > PREVIEW && (
             <button
-              onClick={() => setOpen(!isOpen)}
+              onClick={() => setOpen(!open)}
               aria-expanded={isOpen}
               className="rounded-lg border border-neutral-300 bg-white px-3 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
             >
-              {isOpen ? t.hideFiles : t.showFiles}
+              {isOpen ? t.hideFiles : `${t.showFiles} (${lang === 'bn' ? toBn(rows.length) : rows.length})`}
             </button>
           )}
         </div>
         {rows.length === 0 ? (
           <p className="mt-2 text-sm text-neutral-500">{t.noFiles}</p>
         ) : (
-          isOpen && (
+          visible.length > 0 && (
             <ul className="mt-2 divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-200 bg-white">
-              {rows.map(({ file, duplicateOf, matchedTo }) => (
+              {visible.map(({ file, duplicateOf, matchedTo }) => (
                 <li key={file.id} className="flex items-center gap-3 px-3 py-2">
                   <span
                     className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${

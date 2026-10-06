@@ -85,6 +85,8 @@ function App() {
   const [building, setBuilding] = useState(false)
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string }>()
   const [autoCount, setAutoCount] = useState<number | null>(null)
+  const [autoOn, setAutoOn] = useState(false)
+  const [autoAssigned, setAutoAssigned] = useState<Record<string, string>>({}) // matches made by auto-match, removed when it is turned off
   const [made, setMade] = useState(false) // package downloaded at least once (step 4 done)
   const [withIndex, setWithIndex] = useState(true)
   const [bannerHiddenAt, setBannerHiddenAt] = useState<number | null>(null) // closed until the problem count changes
@@ -124,6 +126,8 @@ function App() {
     setSealPages('1')
     setMessage(undefined)
     setAutoCount(null)
+    setAutoOn(false)
+    setAutoAssigned({})
     setMade(false)
   }
 
@@ -192,6 +196,8 @@ function App() {
       setExpiry({})
       setMessage(undefined)
       setAutoCount(null)
+      setAutoOn(false)
+      setAutoAssigned({})
       setMade(false)
     }
   }
@@ -241,6 +247,12 @@ function App() {
   }
 
   function setMatch(reqId: string, fileId: string) {
+    setAutoAssigned((prev) => {
+      if (!(reqId in prev)) return prev
+      const next = { ...prev }
+      delete next[reqId] // the user took this one over by hand
+      return next
+    })
     setMatches((prev) => {
       const next = { ...prev }
       if (fileId) next[reqId] = fileId
@@ -257,13 +269,13 @@ function App() {
   }
 
   // Bonus: suggest matches from file names. Best word overlap wins; on a tie the newer year in the name wins.
-  function autoMatch() {
+  function computeAuto(base: Record<string, string>) {
     const words = (s: string) => s.toLowerCase().replace(/\.pdf$/, '').split(/[^a-z0-9]+/).filter((w) => w.length > 2)
     const skip = new Set(['certificate', 'cert', 'the', 'and', 'for'])
     const year = (s: string) => Math.max(0, ...(s.match(/20\d\d/g) ?? []).map(Number))
     const pairs: { req: string; file: UploadedFile; score: number }[] = []
     for (const r of reqs) {
-      if (matches[r.id]) continue
+      if (base[r.id]) continue
       const rw = words(r.title_en).filter((w) => !skip.has(w))
       for (const f of files) {
         const fw = words(f.name)
@@ -272,20 +284,47 @@ function App() {
       }
     }
     pairs.sort((a, b) => b.score - a.score || year(b.file.name) - year(a.file.name))
-    const next = { ...matches }
+    const next = { ...base }
+    const assigned: Record<string, string> = {}
     const usedFiles = new Set(Object.values(next))
     const usedHashes = new Set([...usedFiles].map((id) => fileById.get(id)?.hash))
-    let count = 0
     for (const { req, file } of pairs) {
       if (next[req] || usedFiles.has(file.id) || usedHashes.has(file.hash)) continue
-      next[req] = file.id
+      next[req] = assigned[req] = file.id
       usedFiles.add(file.id)
       usedHashes.add(file.hash)
-      count++
     }
-    setMatches(next)
-    setAutoCount(count)
+    return { next, assigned }
   }
+
+  // Bonus auto-match as an on/off switch. Off removes only the matches it made; manual ones stay.
+  function toggleAuto(on: boolean) {
+    setAutoOn(on)
+    if (on) {
+      const { next, assigned } = computeAuto(matches)
+      setMatches(next)
+      setAutoAssigned(assigned)
+      setAutoCount(Object.keys(assigned).length)
+      return
+    }
+    const drop = Object.keys(autoAssigned).filter((k) => matches[k] === autoAssigned[k])
+    setMatches((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => !drop.includes(k))))
+    setExpiry((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => !drop.includes(k))))
+    setAutoAssigned({})
+    setAutoCount(null)
+  }
+
+  // While the switch is on, files added later are matched too.
+  useEffect(() => {
+    if (!autoOn) return
+    const { next, assigned } = computeAuto(matches)
+    const n = Object.keys(assigned).length
+    if (!n) return
+    setMatches(next)
+    setAutoAssigned((prev) => ({ ...prev, ...assigned }))
+    setAutoCount((c) => (c ?? 0) + n)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files])
 
   function download(blob: Blob, name: string) {
     const url = URL.createObjectURL(blob)
@@ -455,15 +494,20 @@ function App() {
               {files.length > 0 && (
                 <div className="mb-4 flex flex-wrap items-center gap-3">
                   <button
-                    onClick={autoMatch}
-                    className="inline-flex items-center gap-2 rounded-xl border border-accent py-1.5 pl-1.5 pr-4 text-sm font-semibold text-accent hover:bg-accent/5"
+                    role="switch"
+                    aria-checked={autoOn}
+                    onClick={() => toggleAuto(!autoOn)}
+                    className="inline-flex items-center gap-3 rounded-xl border border-neutral-200 bg-white py-1.5 pl-1.5 pr-2 text-sm font-semibold text-neutral-800 hover:bg-neutral-50"
                   >
                     <span className="grid h-7 w-7 place-items-center rounded-lg bg-violet-100 text-violet-600">
                       <IconSparkle className="h-4 w-4" />
                     </span>
                     {t.autoMatch}
+                    <span className={`relative h-6 w-11 shrink-0 rounded-full transition ${autoOn ? 'bg-brand' : 'bg-neutral-300'}`} aria-hidden="true">
+                      <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${autoOn ? 'left-[22px]' : 'left-0.5'}`} />
+                    </span>
                   </button>
-                  {autoCount !== null && (
+                  {autoOn && autoCount !== null && (
                     <span className="text-sm text-neutral-600">{autoCount ? t.autoMatched(autoCount) : t.autoNone}</span>
                   )}
                 </div>

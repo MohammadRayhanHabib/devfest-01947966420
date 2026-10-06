@@ -3,6 +3,12 @@
 
 @theme {
   --font-sans: 'Inter', 'Anek Bangla', ui-sans-serif, system-ui, sans-serif;
+  --color-brand: #4d5ef6;
+  --color-brand-dark: #3f4fe0;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 html[lang='bn'] body {

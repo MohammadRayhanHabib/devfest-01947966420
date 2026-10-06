@@ -29,7 +29,7 @@ export default function ChecklistTable(p: Props) {
       value={p.matches[r.id] ?? ''}
       onChange={(e) => p.onMatch(r.id, e.target.value)}
       aria-label={`${t.colFile}: ${name(r)}`}
-      className="w-full rounded-lg border border-neutral-300 bg-white px-2 py-2 text-sm focus:border-[#4d5ef6] focus:outline-none focus:ring-2 focus:ring-[#4d5ef6]/20 md:max-w-64 md:py-1.5"
+      className="w-full rounded-lg border border-neutral-300 bg-white px-2 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20 lg:max-w-56 lg:py-1.5"
     >
       <option value="">{t.chooseFile}</option>
       {p.files.map((f) => {
@@ -53,7 +53,7 @@ export default function ChecklistTable(p: Props) {
         value={p.expiry[r.id] ?? ''}
         onChange={(e) => p.onExpiry(r.id, e.target.value)}
         aria-label={`${t.colExpiry}: ${name(r)}`}
-        className={`w-full rounded-lg border px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#4d5ef6]/20 md:w-auto ${
+        className={`w-full rounded-lg border px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/20 lg:w-auto ${
           p.statuses[r.id] === 'expiry_needed' ? 'border-amber-400 bg-amber-50' : 'border-neutral-300'
         }`}
       />
@@ -67,7 +67,7 @@ export default function ChecklistTable(p: Props) {
       <p className="mt-1 text-sm text-neutral-600">{t.checklistDesc}</p>
 
       {/* Mobile: app-style cards */}
-      <ul className="mt-4 space-y-3 md:hidden">
+      <ul className="mt-4 space-y-3 lg:hidden">
         {p.reqs.map((r) => (
           <li key={r.id} className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
@@ -94,8 +94,8 @@ export default function ChecklistTable(p: Props) {
       </ul>
 
       {/* Desktop: table */}
-      <div className="mt-4 hidden overflow-x-auto rounded-xl border border-neutral-200 md:block">
-        <table className="w-full min-w-[720px] text-left text-sm">
+      <div className="mt-4 hidden overflow-x-auto rounded-xl border border-neutral-200 lg:block">
+        <table className="w-full min-w-[600px] text-left text-sm">
           <thead className="bg-neutral-50 text-xs font-medium text-neutral-500">
             <tr>
               <th className="w-10 px-3 py-2.5">{t.colNo}</th>

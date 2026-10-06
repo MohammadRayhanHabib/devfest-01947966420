@@ -29,7 +29,7 @@ const kb = (n: number) => (n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${
 
 export default function FileList({ t, rows, rejected, onRemove, onClearRejected }: Props) {
   return (
-    <div className="mt-5 space-y-5">
+    <div className="mt-4 space-y-4">
       {rejected.length > 0 && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-3" role="alert">
           <div className="flex items-center justify-between">
@@ -55,11 +55,16 @@ export default function FileList({ t, rows, rejected, onRemove, onClearRejected 
         {rows.length === 0 ? (
           <p className="mt-2 text-sm text-neutral-500">{t.noFiles}</p>
         ) : (
-          <ul className="mt-2 divide-y divide-neutral-100">
+          <ul className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {rows.map(({ file, duplicateOf, matchedTo }) => (
-              <li key={file.id} className="flex items-start gap-2.5 py-2.5">
-                <span className="mt-0.5 grid h-8 w-7 place-items-center rounded border border-neutral-300 text-[9px] font-bold text-neutral-500">
-                  PDF
+              <li key={file.id} className="flex items-start gap-2.5 rounded-xl border border-neutral-200 bg-white p-2.5">
+                <span
+                  className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${
+                    duplicateOf ? 'bg-amber-300 text-amber-900' : matchedTo ? 'bg-lime-300 text-lime-900' : 'bg-pink-200 text-pink-800'
+                  }`}
+                  aria-hidden="true"
+                >
+                  <IconFiles />
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-neutral-900" title={file.name}>

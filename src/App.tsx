@@ -3,16 +3,28 @@ import ChecklistTable, { type OptionState } from './components/ChecklistTable'
 import type { FileRow, Rejected } from './components/FileList'
 import GenerateBar from './components/GenerateBar'
 import Header from './components/Header'
-import { IconAlert, IconPackage } from './components/icons'
-import Sidebar from './components/Sidebar'
+import { IconAlert, IconPackage, IconSave, IconSparkle, IconX } from './components/icons'
+import Sidebar, { goTo } from './components/Sidebar'
+import StepBlock from './components/StepBlock'
 import Steps from './components/Steps'
 import TenderCard from './components/TenderCard'
 import UploadPanel from './components/UploadPanel'
 import { sha256 } from './lib/hash'
 import { dict } from './lib/i18n'
-import { buildPackage, inspectPdf } from './lib/pdf'
+import { buildPackage, inspectPdf, parsePages } from './lib/pdf'
 import { computeStatus, isBlocking } from './lib/status'
+import { clearProject, loadProject, saveProject } from './lib/storage'
 import type { Lang, RequirementsFile, Status, UploadedFile } from './types'
+
+interface Saved {
+  data: RequirementsFile | null
+  files: UploadedFile[]
+  matches: Record<string, string>
+  expiry: Record<string, string>
+  withIndex: boolean
+  seal: { name: string; bytes: ArrayBuffer } | null
+  sealPages: string
+}
 
 const MAX_FILES = 30
 const MAX_BYTES = 50 * 1024 * 1024
@@ -75,6 +87,52 @@ function App() {
   const [autoCount, setAutoCount] = useState<number | null>(null)
   const [made, setMade] = useState(false) // package downloaded at least once (step 4 done)
   const [withIndex, setWithIndex] = useState(true)
+  const [seal, setSeal] = useState<{ name: string; bytes: ArrayBuffer } | null>(null)
+  const [sealPages, setSealPages] = useState('1')
+  const [sealError, setSealError] = useState(false)
+  const [restored, setRestored] = useState(false)
+  const sealInput = useRef<HTMLInputElement>(null)
+
+  // Bonus "save and reopen": restore the last project once, then save after every change.
+  useEffect(() => {
+    loadProject<Saved>().then((p) => {
+      if (p?.data) {
+        setData(p.data)
+        setFiles(p.files ?? [])
+        setMatches(p.matches ?? {})
+        setExpiry(p.expiry ?? {})
+        setWithIndex(p.withIndex ?? true)
+        setSeal(p.seal ?? null)
+        setSealPages(p.sealPages ?? '1')
+      }
+      setRestored(true)
+    })
+  }, [])
+  useEffect(() => {
+    if (restored) saveProject({ data, files, matches, expiry, withIndex, seal, sealPages } satisfies Saved)
+  }, [restored, data, files, matches, expiry, withIndex, seal, sealPages])
+
+  function startOver() {
+    clearProject()
+    setData(null)
+    setFiles([])
+    setMatches({})
+    setExpiry({})
+    setRejected([])
+    setSeal(null)
+    setSealPages('1')
+    setMessage(undefined)
+    setAutoCount(null)
+    setMade(false)
+  }
+
+  async function addSeal(f: File) {
+    const bytes = await f.arrayBuffer()
+    const png = new Uint8Array(bytes.slice(0, 4))
+    const isPng = png[0] === 0x89 && png[1] === 0x50 && png[2] === 0x4e && png[3] === 0x47
+    setSealError(!isPng)
+    if (isPng) setSeal({ name: f.name, bytes })
+  }
   const jsonInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -250,7 +308,10 @@ function App() {
       const items = reqs
         .filter((r) => matches[r.id] && fileById.get(matches[r.id]))
         .map((r) => ({ req: r, file: fileById.get(matches[r.id])! }))
-      const bytes = await buildPackage(data.tender, items, { index: withIndex })
+      const bytes = await buildPackage(data.tender, items, {
+        index: withIndex,
+        seal: seal ? { png: seal.bytes, pages: parsePages(sealPages) } : undefined,
+      })
       const name = `${data.tender.tender_id}_Package.pdf`
       download(new Blob([bytes as BlobPart], { type: 'application/pdf' }), name)
       setMessage({ kind: 'ok', text: t.done(name) })
@@ -267,12 +328,25 @@ function App() {
   const problemCount = data ? problems.length : 0
 
   const steps = [Boolean(data), files.length > 0, Boolean(data) && problemCount === 0, made]
+  const current = steps.findIndex((d) => !d)
   const openJson = () => jsonInput.current?.click()
   const openPdfs = () => document.getElementById('pdf-input')?.click()
+  const uploadSection = (
+    <UploadPanel
+      t={t}
+      lang={lang}
+      rows={fileRows}
+      rejected={rejected}
+      busy={uploading}
+      onFiles={addFiles}
+      onRemove={removeFile}
+      onClearRejected={() => setRejected([])}
+    />
+  )
 
   return (
     <div className="min-h-screen pb-16 lg:flex lg:pb-0">
-      <Header t={t} lang={lang} onLang={setLang} />
+      <Header t={t} lang={lang} onLang={setLang} hasData={Boolean(data)} />
       <Sidebar
         t={t}
         lang={lang}
@@ -283,6 +357,8 @@ function App() {
         total={reqs.length}
         problemCount={problemCount}
         fileCount={files.length}
+        hasData={Boolean(data)}
+        steps={steps}
       />
       <input
         ref={jsonInput}
@@ -300,9 +376,9 @@ function App() {
           <div className="flex items-center justify-center gap-3 bg-amber-400 px-4 py-2.5 text-sm text-neutral-900 lg:rounded-xl">
             <IconAlert className="h-4 w-4" />
             <span className="font-medium">{t.bannerText(problemCount)}</span>
-            <a href="#package" className="rounded-lg bg-neutral-900 px-3 py-1 text-xs font-semibold text-white">
+            <button onClick={() => goTo('package')} className="rounded-lg bg-neutral-900 px-3 py-1 text-xs font-semibold text-white">
               {t.bannerAction}
-            </a>
+            </button>
           </div>
         )}
         <div className="min-h-0 flex-1 bg-white lg:flex lg:overflow-hidden lg:rounded-2xl lg:border lg:border-neutral-200">
@@ -324,26 +400,45 @@ function App() {
               <h1 className="mt-5 text-2xl font-semibold text-neutral-900">{t.loadTitle}</h1>
               <p className="mt-2 text-[15px] text-neutral-600">{t.loadDesc}</p>
               <div className="mt-8 w-full text-left">
-                <Steps t={t} lang={lang} done={steps} />
+                <Steps t={t} lang={lang} done={steps} layout="list" />
               </div>
               <button
                 onClick={openJson}
-                className="mt-8 rounded-xl bg-[#4d5ef6] px-8 py-3 text-[15px] font-semibold text-white shadow-sm hover:bg-[#3f4fe0]"
+                className="mt-8 rounded-xl bg-brand px-8 py-3 text-[15px] font-semibold text-white shadow-sm hover:bg-brand-dark"
               >
                 {t.loadButton}
               </button>
             </section>
-          ) : (
-            <>
-              <TenderCard t={t} tender={data.tender} onLoadAnother={openJson} />
-              <Steps t={t} lang={lang} done={steps} />
+          ) : null}
+          {!data && <div className="mx-auto max-w-2xl">{uploadSection}</div>}
+          {data && (
+            <div>
+              <StepBlock n={1} lang={lang} done={steps[0]} active={current === 0}>
+                <TenderCard t={t} tender={data.tender} onLoadAnother={openJson} />
+                <p className="mt-3 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+                  <span className="grid h-6 w-6 place-items-center rounded-md bg-sky-200 text-sky-900">
+                    <IconSave className="h-3.5 w-3.5" />
+                  </span>
+                  {t.savedNote}
+                  <button onClick={startOver} className="font-medium text-brand underline">
+                    {t.startOver}
+                  </button>
+                </p>
+              </StepBlock>
+              <StepBlock n={2} lang={lang} done={steps[1]} active={current === 1}>
+                {uploadSection}
+              </StepBlock>
+              <StepBlock n={3} lang={lang} done={steps[2]} active={current === 2}>
               {files.length > 0 && (
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="mb-4 flex flex-wrap items-center gap-3">
                   <button
                     onClick={autoMatch}
-                    className="rounded-xl border border-[#4d5ef6] px-4 py-2 text-sm font-semibold text-[#4d5ef6] hover:bg-[#4d5ef6]/5"
+                    className="inline-flex items-center gap-2 rounded-xl border border-brand py-1.5 pl-1.5 pr-4 text-sm font-semibold text-brand hover:bg-brand/5"
                   >
-                    ✨ {t.autoMatch}
+                    <span className="grid h-7 w-7 place-items-center rounded-lg bg-amber-300 text-amber-900">
+                      <IconSparkle className="h-4 w-4" />
+                    </span>
+                    {t.autoMatch}
                   </button>
                   {autoCount !== null && <span className="text-sm text-neutral-600">{t.autoMatched(autoCount)}</span>}
                 </div>
@@ -360,6 +455,8 @@ function App() {
                 onMatch={setMatch}
                 onExpiry={(id, d) => setExpiry((prev) => ({ ...prev, [id]: d }))}
               />
+              </StepBlock>
+              <StepBlock n={4} lang={lang} done={steps[3]} active={current === 3} last>
               <GenerateBar t={t} problems={problems} busy={building} message={message} onGenerate={generate}>
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                   <label className="flex items-center gap-2 text-sm text-neutral-700">
@@ -367,7 +464,7 @@ function App() {
                       type="checkbox"
                       checked={withIndex}
                       onChange={(e) => setWithIndex(e.target.checked)}
-                      className="h-4 w-4 accent-[#4d5ef6]"
+                      className="h-4 w-4 accent-brand"
                     />
                     {t.indexOption}
                   </label>
@@ -378,20 +475,53 @@ function App() {
                     {t.exportCsv}
                   </button>
                 </div>
+                <div className="mt-4 rounded-xl border border-dashed border-neutral-300 bg-[#f7f7f5] p-3">
+                  <p className="text-sm font-semibold text-neutral-800">{t.sealTitle}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                    <input
+                      ref={sealInput}
+                      type="file"
+                      accept="image/png"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        if (f) addSeal(f)
+                        e.target.value = ''
+                      }}
+                    />
+                    {seal ? (
+                      <span className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-1.5 text-sm">
+                        {seal.name}
+                        <button onClick={() => setSeal(null)} aria-label={`${t.remove} ${seal.name}`} className="text-neutral-400 hover:text-neutral-800">
+                          <IconX className="h-3.5 w-3.5" />
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => sealInput.current?.click()}
+                        className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-neutral-50"
+                      >
+                        {t.sealAdd}
+                      </button>
+                    )}
+                    <label className="flex items-center gap-2 text-sm text-neutral-700">
+                      {t.sealPagesLabel}
+                      <input
+                        value={sealPages}
+                        onChange={(e) => setSealPages(e.target.value)}
+                        placeholder={t.sealPagesHint}
+                        className="w-32 rounded-lg border border-neutral-300 px-2 py-1 text-sm"
+                      />
+                    </label>
+                  </div>
+                  {sealError && <p className="mt-2 text-sm text-red-700" role="alert">{t.sealNotPng}</p>}
+                </div>
               </GenerateBar>
-            </>
+              </StepBlock>
+            </div>
           )}
         </main>
-        <UploadPanel
-          t={t}
-          lang={lang}
-          rows={fileRows}
-          rejected={rejected}
-          busy={uploading}
-          onFiles={addFiles}
-          onRemove={removeFile}
-          onClearRejected={() => setRejected([])}
-        />
+
         </div>
       </div>
     </div>

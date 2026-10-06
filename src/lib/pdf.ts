@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from 'pdf-lib'
+import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib'
 import type { Requirement, Tender, UploadedFile } from '../types'
 
 export type PdfCheck =
@@ -148,8 +148,40 @@ function drawCover(
 
 type Row = { order: number; title: string; pages: number; start: number }
 
+// Standard PDF fonts can't shape Bangla, so let the browser draw it on a canvas and embed that as an image.
+async function bnImage(out: PDFDocument, text: string): Promise<PDFImage | undefined> {
+  if (typeof document === 'undefined' || !text) return undefined
+  try {
+    const px = 40
+    const fontSpec = `500 ${px}px 'Anek Bangla', 'Noto Sans Bengali', sans-serif`
+    await document.fonts.load(fontSpec, text)
+    const c = document.createElement('canvas')
+    const ctx = c.getContext('2d')!
+    ctx.font = fontSpec
+    c.width = Math.ceil(ctx.measureText(text).width) + 8
+    c.height = Math.ceil(px * 1.5)
+    ctx.font = fontSpec
+    ctx.fillStyle = '#5b6470'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(text, 4, c.height / 2)
+    const data = c.toDataURL('image/png')
+    return await out.embedPng(data)
+  } catch {
+    return undefined
+  }
+}
+
 // Table of documents: No. | Document | Pages | Starts on. Long titles are cut with "...".
-function drawDocList(page: PDFPage, rows: Row[], top: number, baseSize: number, font: PDFFont, bold: PDFFont) {
+// When Bangla images are given, each title gets its Bangla name on a second line.
+function drawDocList(
+  page: PDFPage,
+  rows: Row[],
+  top: number,
+  baseSize: number,
+  font: PDFFont,
+  bold: PDFFont,
+  bn: (PDFImage | undefined)[] = [],
+) {
   const { width } = page.getSize()
   const m = 56
   const text = rgb(0.12, 0.14, 0.17)
@@ -171,25 +203,43 @@ function drawDocList(page: PDFPage, rows: Row[], top: number, baseSize: number, 
     page.drawText(lines.length > 1 ? `${lines[0]}...` : lines[0], { x: cols.title, y, size, font, color: text })
     page.drawText(String(r.pages), { x: cols.pages, y, size, font, color: text })
     page.drawText(`Page ${r.start}`, { x: cols.start, y, size, font, color: text })
+    const img = bn[i]
+    if (img) {
+      const h = size + 3
+      const w = Math.min((img.width / img.height) * h, cols.pages - cols.title - 24)
+      page.drawImage(img, { x: cols.title, y: y - h - 4, width: w, height: h })
+      y -= h + 4
+    }
     y -= step
   })
 }
 
 // Bonus: a separate index page right after the cover.
-function drawIndex(page: PDFPage, tender: Tender, rows: Row[], font: PDFFont, bold: PDFFont) {
+function drawIndex(page: PDFPage, tender: Tender, rows: Row[], font: PDFFont, bold: PDFFont, bn: (PDFImage | undefined)[]) {
   const { width, height } = page.getSize()
   const dark = rgb(0.06, 0.2, 0.3)
   page.drawRectangle({ x: 0, y: height - 90, width, height: 90, color: dark })
   page.drawText('INDEX', { x: 56, y: height - 52, size: 20, font: bold, color: rgb(1, 1, 1) })
   page.drawText(safe(tender.tender_id), { x: 56, y: height - 74, size: 10, font, color: rgb(0.8, 0.87, 0.93) })
-  drawDocList(page, rows, height - 130, 11, font, bold)
+  drawDocList(page, rows, height - 130, 11, font, bold, bn)
+}
+
+// "1, 3-5" -> [1, 3, 4, 5]
+export function parsePages(text: string): number[] {
+  const out = new Set<number>()
+  for (const part of text.split(/[,\s]+/).filter(Boolean)) {
+    const [a, b] = part.split('-').map((n) => parseInt(n, 10))
+    if (Number.isNaN(a)) continue
+    for (let p = a; p <= (Number.isNaN(b) || b === undefined ? a : b) && p - a < 500; p++) out.add(p)
+  }
+  return [...out]
 }
 
 // Builds the final package: cover page, (optional index page), documents sorted by order, footer on every page.
 export async function buildPackage(
   tender: Tender,
   items: PackageItem[],
-  opts: { index?: boolean } = {},
+  opts: { index?: boolean; seal?: { png: ArrayBuffer; pages: number[] } } = {},
 ): Promise<Uint8Array> {
   const sorted = [...items].sort((a, b) => a.req.order - b.req.order)
   const out = await PDFDocument.create()
@@ -206,7 +256,10 @@ export async function buildPackage(
 
   const cover = out.addPage([595.28, 841.89])
   drawCover(cover, tender, rows, font, bold)
-  if (opts.index) drawIndex(out.addPage([595.28, 841.89]), tender, rows, font, bold)
+  if (opts.index) {
+    const bn = await Promise.all(sorted.map((it) => (it.req.title_bn !== it.req.title_en ? bnImage(out, it.req.title_bn) : undefined)))
+    drawIndex(out.addPage([595.28, 841.89]), tender, rows, font, bold, bn)
+  }
 
   for (const it of sorted) {
     const src = await PDFDocument.load(it.file.bytes)
@@ -220,5 +273,18 @@ export async function buildPackage(
   const total = out.getPageCount()
   const ownPages = opts.index ? 2 : 1 // cover (and index) are ours, no strip to paint
   out.getPages().forEach((p, i) => drawFooter(p, `${safe(tender.tender_id)} | Page ${i + 1} of ${total}`, font, i >= ownPages))
+
+  // Bonus: seal / signature image, bottom-right just above the footer strip, on the chosen pages.
+  if (opts.seal) {
+    const img = await out.embedPng(opts.seal.png)
+    const w = 90
+    const h = (img.height / img.width) * w
+    for (const n of opts.seal.pages) {
+      const p = out.getPages()[n - 1]
+      if (!p) continue
+      const b = p.getCropBox()
+      p.drawImage(img, { x: b.x + b.width - w - 36, y: b.y + FOOTER_H + 10, width: w, height: h, opacity: 0.95 })
+    }
+  }
   return out.save()
 }

@@ -59,6 +59,18 @@ export const IconCheck = (p: P) => (
     <path d="M20 6 9 17l-5-5" />
   </Svg>
 )
+export const IconSave = (p: P) => (
+  <Svg {...p}>
+    <path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z" />
+    <path d="M8 3v5h7V3M8 21v-6h8v6" />
+  </Svg>
+)
+export const IconSparkle = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 3l1.8 4.9L19 9.7l-5.2 1.8L12 16.5l-1.8-5L5 9.7l5.2-1.8z" />
+    <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" />
+  </Svg>
+)
 export const IconDownload = (p: P) => (
   <Svg {...p}>
     <path d="M12 4v12M7 11l5 5 5-5M4 20h16" />

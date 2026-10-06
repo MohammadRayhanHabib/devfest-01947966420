@@ -23,7 +23,7 @@ export default function UploadPanel(p: Props) {
   return (
     <aside
       id="files"
-      className="w-full shrink-0 scroll-mt-16 border-t border-neutral-200 bg-white p-4 lg:w-80 lg:overflow-y-auto lg:border-l lg:border-t-0"
+      className="w-full shrink-0 scroll-mt-16 border-t border-neutral-200 bg-white p-4 lg:w-80 lg:overflow-y-auto lg:border-l lg:border-t-0 xl:w-96"
     >
       <h2 className="text-base font-semibold text-neutral-900">{t.addFiles}</h2>
       <div
@@ -37,8 +37,8 @@ export default function UploadPanel(p: Props) {
           setOver(false)
           p.onFiles(Array.from(e.dataTransfer.files))
         }}
-        className={`mt-3 flex flex-col items-center rounded-xl border-2 border-dashed px-4 py-8 text-center transition ${
-          over ? 'border-blue-500 bg-blue-50' : 'border-neutral-300 bg-neutral-100'
+        className={`mt-3 flex flex-col items-center rounded-2xl border-2 border-dashed px-4 py-8 text-center transition ${
+          over ? 'border-[#4d5ef6] bg-[#4d5ef6]/5' : 'border-neutral-300 bg-[#f7f7f5]'
         }`}
       >
         <p className="text-sm font-semibold text-neutral-800">{t.dropTitle}</p>
@@ -53,6 +53,7 @@ export default function UploadPanel(p: Props) {
         </button>
         <input
           ref={input}
+          id="pdf-input"
           type="file"
           multiple
           accept=".pdf,application/pdf"

@@ -74,12 +74,20 @@ function addFooterSpace(page: PDFPage) {
 }
 
 // Draws "<tender_id> | Page X of Y" centred on the visible bottom edge.
-function drawFooter(page: PDFPage, text: string, font: PDFFont) {
+function drawFooter(page: PDFPage, text: string, font: PDFFont, whiteStrip: boolean) {
   const size = 9
   const color = rgb(0.25, 0.29, 0.35)
   const w = font.widthOfTextAtSize(text, size)
   const b = page.getCropBox()
   const rot = rotationOf(page)
+  // Paint the added strip white so anything hidden by an old CropBox can't show through under the footer.
+  if (whiteStrip) {
+    const white = rgb(1, 1, 1)
+    if (rot === 90) page.drawRectangle({ x: b.x + b.width - FOOTER_H, y: b.y, width: FOOTER_H, height: b.height, color: white })
+    else if (rot === 180) page.drawRectangle({ x: b.x, y: b.y + b.height - FOOTER_H, width: b.width, height: FOOTER_H, color: white })
+    else if (rot === 270) page.drawRectangle({ x: b.x, y: b.y, width: FOOTER_H, height: b.height, color: white })
+    else page.drawRectangle({ x: b.x, y: b.y, width: b.width, height: FOOTER_H, color: white })
+  }
   if (rot === 90) {
     page.drawText(text, { x: b.x + b.width - 10, y: b.y + b.height / 2 - w / 2, size, font, color, rotate: degrees(90) })
   } else if (rot === 180) {
@@ -110,7 +118,8 @@ function drawCover(
 
   page.drawRectangle({ x: 0, y: height - 120, width, height: 120, color: dark })
   page.drawText('TENDER SUBMISSION PACKAGE', { x: m, y: height - 62, size: 20, font: bold, color: rgb(1, 1, 1) })
-  page.drawText(safe(`${tender.tender_id} - ${tender.title}`).slice(0, 80), {
+  const banner = wrap(`${tender.tender_id} - ${tender.title}`, font, 11, width - m * 2)
+  page.drawText(banner.length > 1 ? `${banner[0]}...` : banner[0], {
     x: m, y: height - 90, size: 11, font, color: rgb(0.8, 0.87, 0.93),
   })
 
@@ -134,7 +143,18 @@ function drawCover(
 
   y -= 14
   page.drawText('Included Documents', { x: m, y, size: 13, font: bold, color: dark })
-  y -= 22
+  drawDocList(page, rows, y - 22, 10, font, bold)
+}
+
+type Row = { order: number; title: string; pages: number; start: number }
+
+// Table of documents: No. | Document | Pages | Starts on. Long titles are cut with "...".
+function drawDocList(page: PDFPage, rows: Row[], top: number, baseSize: number, font: PDFFont, bold: PDFFont) {
+  const { width } = page.getSize()
+  const m = 56
+  const text = rgb(0.12, 0.14, 0.17)
+  const muted = rgb(0.4, 0.44, 0.5)
+  let y = top
   const cols = { no: m, title: m + 30, pages: width - m - 110, start: width - m - 50 }
   page.drawText('No.', { x: cols.no, y, size: 9, font: bold, color: muted })
   page.drawText('Document', { x: cols.title, y, size: 9, font: bold, color: muted })
@@ -143,27 +163,41 @@ function drawCover(
   y -= 6
   page.drawLine({ start: { x: m, y }, end: { x: width - m, y }, thickness: 0.6, color: rgb(0.8, 0.83, 0.87) })
   y -= 14
-  const size = rows.length > 20 ? 9 : 10
-  const step = rows.length > 20 ? 13 : 16
+  const size = rows.length > 20 ? baseSize - 1 : baseSize
+  const step = rows.length > 20 ? size + 4 : size + 7
   rows.forEach((r, i) => {
     page.drawText(String(i + 1), { x: cols.no, y, size, font, color: text })
-    const title = wrap(r.title, font, size, cols.pages - cols.title - 10)[0]
-    page.drawText(title, { x: cols.title, y, size, font, color: text })
+    const lines = wrap(r.title, font, size, cols.pages - cols.title - 24)
+    page.drawText(lines.length > 1 ? `${lines[0]}...` : lines[0], { x: cols.title, y, size, font, color: text })
     page.drawText(String(r.pages), { x: cols.pages, y, size, font, color: text })
     page.drawText(`Page ${r.start}`, { x: cols.start, y, size, font, color: text })
     y -= step
   })
 }
 
-// Builds the final package: cover page, then documents sorted by order, then a footer on every page.
-export async function buildPackage(tender: Tender, items: PackageItem[]): Promise<Uint8Array> {
+// Bonus: a separate index page right after the cover.
+function drawIndex(page: PDFPage, tender: Tender, rows: Row[], font: PDFFont, bold: PDFFont) {
+  const { width, height } = page.getSize()
+  const dark = rgb(0.06, 0.2, 0.3)
+  page.drawRectangle({ x: 0, y: height - 90, width, height: 90, color: dark })
+  page.drawText('INDEX', { x: 56, y: height - 52, size: 20, font: bold, color: rgb(1, 1, 1) })
+  page.drawText(safe(tender.tender_id), { x: 56, y: height - 74, size: 10, font, color: rgb(0.8, 0.87, 0.93) })
+  drawDocList(page, rows, height - 130, 11, font, bold)
+}
+
+// Builds the final package: cover page, (optional index page), documents sorted by order, footer on every page.
+export async function buildPackage(
+  tender: Tender,
+  items: PackageItem[],
+  opts: { index?: boolean } = {},
+): Promise<Uint8Array> {
   const sorted = [...items].sort((a, b) => a.req.order - b.req.order)
   const out = await PDFDocument.create()
   out.setTitle(`${tender.tender_id} Package`)
   const font = await out.embedFont(StandardFonts.Helvetica)
   const bold = await out.embedFont(StandardFonts.HelveticaBold)
 
-  let start = 2 // page 1 is the cover
+  let start = opts.index ? 3 : 2 // page 1 is the cover, page 2 the index when it is on
   const rows = sorted.map((it) => {
     const row = { order: it.req.order, title: it.req.title_en, pages: it.file.pages, start }
     start += it.file.pages
@@ -172,6 +206,7 @@ export async function buildPackage(tender: Tender, items: PackageItem[]): Promis
 
   const cover = out.addPage([595.28, 841.89])
   drawCover(cover, tender, rows, font, bold)
+  if (opts.index) drawIndex(out.addPage([595.28, 841.89]), tender, rows, font, bold)
 
   for (const it of sorted) {
     const src = await PDFDocument.load(it.file.bytes)
@@ -183,6 +218,7 @@ export async function buildPackage(tender: Tender, items: PackageItem[]): Promis
   }
 
   const total = out.getPageCount()
-  out.getPages().forEach((p, i) => drawFooter(p, `${safe(tender.tender_id)} | Page ${i + 1} of ${total}`, font))
+  const ownPages = opts.index ? 2 : 1 // cover (and index) are ours, no strip to paint
+  out.getPages().forEach((p, i) => drawFooter(p, `${safe(tender.tender_id)} | Page ${i + 1} of ${total}`, font, i >= ownPages))
   return out.save()
 }

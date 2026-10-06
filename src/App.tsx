@@ -3,8 +3,9 @@ import ChecklistTable, { type OptionState } from './components/ChecklistTable'
 import type { FileRow, Rejected } from './components/FileList'
 import GenerateBar from './components/GenerateBar'
 import Header from './components/Header'
-import { IconChecklist } from './components/icons'
+import { IconAlert, IconPackage } from './components/icons'
 import Sidebar from './components/Sidebar'
+import Steps from './components/Steps'
 import TenderCard from './components/TenderCard'
 import UploadPanel from './components/UploadPanel'
 import { sha256 } from './lib/hash'
@@ -71,6 +72,9 @@ function App() {
   const [uploading, setUploading] = useState(false)
   const [building, setBuilding] = useState(false)
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string }>()
+  const [autoCount, setAutoCount] = useState<number | null>(null)
+  const [made, setMade] = useState(false) // package downloaded at least once (step 4 done)
+  const [withIndex, setWithIndex] = useState(true)
   const jsonInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -128,6 +132,8 @@ function App() {
       setMatches({})
       setExpiry({})
       setMessage(undefined)
+      setAutoCount(null)
+      setMade(false)
     }
   }
 
@@ -140,17 +146,17 @@ function App() {
     let total = files.reduce((s, f) => s + f.size, 0)
     for (const f of list) {
       if (count >= MAX_FILES) {
-        bad.push({ name: f.name, message: t.tooMany })
+        bad.push({ name: f.name, reason: 'tooMany' })
         continue
       }
       if (total + f.size > MAX_BYTES) {
-        bad.push({ name: f.name, message: t.tooBig })
+        bad.push({ name: f.name, reason: 'tooBig' })
         continue
       }
       const bytes = await f.arrayBuffer()
       const check = await inspectPdf(bytes)
       if (!check.ok) {
-        bad.push({ name: f.name, message: t[check.reason === 'not_pdf' ? 'notPdf' : check.reason] })
+        bad.push({ name: f.name, reason: check.reason === 'not_pdf' ? 'notPdf' : check.reason })
         continue
       }
       added.push({ id: crypto.randomUUID(), name: f.name, size: f.size, pages: check.pages, hash: await sha256(bytes), bytes })
@@ -185,6 +191,57 @@ function App() {
     setMessage(undefined)
   }
 
+  // Bonus: suggest matches from file names. Best word overlap wins; on a tie the newer year in the name wins.
+  function autoMatch() {
+    const words = (s: string) => s.toLowerCase().replace(/\.pdf$/, '').split(/[^a-z0-9]+/).filter((w) => w.length > 2)
+    const skip = new Set(['certificate', 'cert', 'the', 'and', 'for'])
+    const year = (s: string) => Math.max(0, ...(s.match(/20\d\d/g) ?? []).map(Number))
+    const pairs: { req: string; file: UploadedFile; score: number }[] = []
+    for (const r of reqs) {
+      if (matches[r.id]) continue
+      const rw = words(r.title_en).filter((w) => !skip.has(w))
+      for (const f of files) {
+        const fw = words(f.name)
+        const score = rw.filter((w) => fw.some((x) => x.slice(0, 5) === w.slice(0, 5))).length
+        if (score > 0) pairs.push({ req: r.id, file: f, score })
+      }
+    }
+    pairs.sort((a, b) => b.score - a.score || year(b.file.name) - year(a.file.name))
+    const next = { ...matches }
+    const usedFiles = new Set(Object.values(next))
+    const usedHashes = new Set([...usedFiles].map((id) => fileById.get(id)?.hash))
+    let count = 0
+    for (const { req, file } of pairs) {
+      if (next[req] || usedFiles.has(file.id) || usedHashes.has(file.hash)) continue
+      next[req] = file.id
+      usedFiles.add(file.id)
+      usedHashes.add(file.hash)
+      count++
+    }
+    setMatches(next)
+    setAutoCount(count)
+  }
+
+  function download(blob: Blob, name: string) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  }
+
+  // Bonus: checklist as CSV (opens in Excel; BOM keeps Bangla text readable).
+  function exportCsv() {
+    if (!data) return
+    const rows = reqs.map((r) => {
+      const f = fileById.get(matches[r.id])
+      return [title(r.id), f?.name ?? '', f ? String(f.pages) : '', expiry[r.id] ?? '', t.status[statuses[r.id]]]
+    })
+    const csv = [t.csvHead, ...rows].map((row) => row.map((c) => `"${c.replace(/"/g, '""')}"`).join(',')).join('\r\n')
+    download(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }), `${data.tender.tender_id}_Checklist.csv`)
+  }
+
   async function generate() {
     if (!data || problems.length > 0) return
     setBuilding(true)
@@ -193,15 +250,11 @@ function App() {
       const items = reqs
         .filter((r) => matches[r.id] && fileById.get(matches[r.id]))
         .map((r) => ({ req: r, file: fileById.get(matches[r.id])! }))
-      const bytes = await buildPackage(data.tender, items)
+      const bytes = await buildPackage(data.tender, items, { index: withIndex })
       const name = `${data.tender.tender_id}_Package.pdf`
-      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }))
-      const a = document.createElement('a')
-      a.href = url
-      a.download = name
-      a.click()
-      setTimeout(() => URL.revokeObjectURL(url), 10_000)
+      download(new Blob([bytes as BlobPart], { type: 'application/pdf' }), name)
       setMessage({ kind: 'ok', text: t.done(name) })
+      setMade(true)
     } catch (e) {
       console.error(e)
       setMessage({ kind: 'error', text: t.genError })
@@ -213,9 +266,24 @@ function App() {
   const okCount = reqs.filter((r) => statuses[r.id] === 'ok').length
   const problemCount = data ? problems.length : 0
 
+  const steps = [Boolean(data), files.length > 0, Boolean(data) && problemCount === 0, made]
+  const openJson = () => jsonInput.current?.click()
+  const openPdfs = () => document.getElementById('pdf-input')?.click()
+
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen pb-16 lg:flex lg:pb-0">
       <Header t={t} lang={lang} onLang={setLang} />
+      <Sidebar
+        t={t}
+        lang={lang}
+        onLang={setLang}
+        onOpenJson={openJson}
+        onAddFiles={openPdfs}
+        okCount={okCount}
+        total={reqs.length}
+        problemCount={problemCount}
+        fileCount={files.length}
+      />
       <input
         ref={jsonInput}
         type="file"
@@ -227,8 +295,17 @@ function App() {
           e.target.value = ''
         }}
       />
-      <div className="lg:flex lg:h-[calc(100vh-3rem)]">
-        <Sidebar t={t} lang={lang} okCount={okCount} problemCount={problemCount} fileCount={files.length} />
+      <div className="min-w-0 flex-1 lg:flex lg:h-screen lg:flex-col lg:gap-3 lg:py-3 lg:pr-3">
+        {data && problemCount > 0 && (
+          <div className="flex items-center justify-center gap-3 bg-amber-400 px-4 py-2.5 text-sm text-neutral-900 lg:rounded-xl">
+            <IconAlert className="h-4 w-4" />
+            <span className="font-medium">{t.bannerText(problemCount)}</span>
+            <a href="#package" className="rounded-lg bg-neutral-900 px-3 py-1 text-xs font-semibold text-white">
+              {t.bannerAction}
+            </a>
+          </div>
+        )}
+        <div className="min-h-0 flex-1 bg-white lg:flex lg:overflow-hidden lg:rounded-2xl lg:border lg:border-neutral-200">
         <main className="min-w-0 flex-1 space-y-8 p-4 sm:p-6 lg:overflow-y-auto lg:p-8">
           {jsonError && (
             <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-800">
@@ -236,22 +313,41 @@ function App() {
             </p>
           )}
           {!data ? (
-            <section id="tender" className="mx-auto max-w-xl rounded-2xl border border-neutral-200 p-8 text-center">
-              <span className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-neutral-100 text-neutral-700">
-                <IconChecklist className="h-6 w-6" />
-              </span>
-              <h1 className="mt-4 text-2xl font-semibold text-neutral-900">{t.loadTitle}</h1>
-              <p className="mt-2 text-sm text-neutral-600">{t.loadDesc}</p>
+            <section id="tender" className="mx-auto flex max-w-lg flex-col items-center py-6 text-center lg:py-16">
+              <div className="relative h-20 w-24" aria-hidden="true">
+                <span className="absolute left-1 top-7 h-10 w-10 rotate-12 rounded-xl bg-lime-400" />
+                <span className="absolute left-9 top-0 h-9 w-9 rounded-full bg-yellow-300" />
+                <span className="absolute left-12 top-9 grid h-10 w-10 place-items-center rounded-xl bg-orange-500 text-white">
+                  <IconPackage className="h-5 w-5" />
+                </span>
+              </div>
+              <h1 className="mt-5 text-2xl font-semibold text-neutral-900">{t.loadTitle}</h1>
+              <p className="mt-2 text-[15px] text-neutral-600">{t.loadDesc}</p>
+              <div className="mt-8 w-full text-left">
+                <Steps t={t} lang={lang} done={steps} />
+              </div>
               <button
-                onClick={() => jsonInput.current?.click()}
-                className="mt-6 rounded-lg bg-neutral-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-neutral-800"
+                onClick={openJson}
+                className="mt-8 rounded-xl bg-[#4d5ef6] px-8 py-3 text-[15px] font-semibold text-white shadow-sm hover:bg-[#3f4fe0]"
               >
                 {t.loadButton}
               </button>
             </section>
           ) : (
             <>
-              <TenderCard t={t} tender={data.tender} onLoadAnother={() => jsonInput.current?.click()} />
+              <TenderCard t={t} tender={data.tender} onLoadAnother={openJson} />
+              <Steps t={t} lang={lang} done={steps} />
+              {files.length > 0 && (
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={autoMatch}
+                    className="rounded-xl border border-[#4d5ef6] px-4 py-2 text-sm font-semibold text-[#4d5ef6] hover:bg-[#4d5ef6]/5"
+                  >
+                    ✨ {t.autoMatch}
+                  </button>
+                  {autoCount !== null && <span className="text-sm text-neutral-600">{t.autoMatched(autoCount)}</span>}
+                </div>
+              )}
               <ChecklistTable
                 t={t}
                 lang={lang}
@@ -264,7 +360,25 @@ function App() {
                 onMatch={setMatch}
                 onExpiry={(id, d) => setExpiry((prev) => ({ ...prev, [id]: d }))}
               />
-              <GenerateBar t={t} problems={problems} busy={building} message={message} onGenerate={generate} />
+              <GenerateBar t={t} problems={problems} busy={building} message={message} onGenerate={generate}>
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                  <label className="flex items-center gap-2 text-sm text-neutral-700">
+                    <input
+                      type="checkbox"
+                      checked={withIndex}
+                      onChange={(e) => setWithIndex(e.target.checked)}
+                      className="h-4 w-4 accent-[#4d5ef6]"
+                    />
+                    {t.indexOption}
+                  </label>
+                  <button
+                    onClick={exportCsv}
+                    className="rounded-xl border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+                  >
+                    {t.exportCsv}
+                  </button>
+                </div>
+              </GenerateBar>
             </>
           )}
         </main>
@@ -278,6 +392,7 @@ function App() {
           onRemove={removeFile}
           onClearRejected={() => setRejected([])}
         />
+        </div>
       </div>
     </div>
   )

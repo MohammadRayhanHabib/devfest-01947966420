@@ -8,9 +8,12 @@ export interface FileRow {
   matchedTo?: string // title of the document it is matched to
 }
 
+export type RejectReason = 'notPdf' | 'password' | 'damaged' | 'tooMany' | 'tooBig'
+
+// Only the reason is stored, so the message follows the current language.
 export interface Rejected {
   name: string
-  message: string
+  reason: RejectReason
 }
 
 interface Props {
@@ -40,7 +43,7 @@ export default function FileList({ t, rows, rejected, onRemove, onClearRejected 
           <ul className="mt-2 space-y-1.5">
             {rejected.map((r, i) => (
               <li key={i} className="text-xs text-red-800">
-                <span className="font-semibold break-all">{r.name}</span>: {r.message}
+                <span className="font-semibold break-all">{r.name}</span>: {t[r.reason]}
               </li>
             ))}
           </ul>

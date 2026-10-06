@@ -36,7 +36,7 @@ export default function GenerateBar({ t, problems, busy, message, onGenerate, ch
         <button
           onClick={onGenerate}
           disabled={blocked || busy}
-          className="inline-flex items-center gap-2 rounded-xl bg-brand px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-neutral-300 disabled:shadow-none"
+          className="inline-flex items-center gap-2 rounded-xl bg-accent px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-accent-dark disabled:cursor-not-allowed disabled:bg-neutral-300 disabled:shadow-none"
         >
           <IconDownload />
           {busy ? t.generating : t.generate}

@@ -53,30 +53,27 @@ export default function Sidebar(p: Props) {
           onClick={p.onAddFiles}
           className="flex w-full items-center justify-center gap-2 rounded-xl border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
         >
-          <IconUpload /> {t.selectFiles}
+          <IconUpload className="h-4 w-4 text-violet-500" /> {t.selectFiles}
         </button>
       </div>
       <nav className="space-y-0.5">
-        {NAV(t).map(({ href, label }, i) => (
+        {NAV(t).map(({ href, label, icon: Icon }, i) => (
           <button
             key={href}
             onClick={() => goTo(href)}
             disabled={!p.hasData && (href === 'checklist' || href === 'package')}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-200/60 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-neutral-800 hover:bg-neutral-200/60 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
+              i === p.steps.findIndex((d) => !d) ? 'bg-neutral-200/80 font-medium' : ''
+            }`}
           >
-            <span
-              className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-bold ${
-                p.steps[i] ? 'bg-emerald-500 text-white' : i === p.steps.findIndex((d) => !d) ? 'bg-brand text-white' : 'bg-neutral-200 text-neutral-500'
-              }`}
-            >
-              {p.steps[i] ? <IconCheck className="h-3.5 w-3.5" /> : n(i + 1)}
-            </span>
+            <Icon className="h-4.5 w-4.5 text-neutral-500" />
             <span className="flex-1">{label}</span>
             {href === 'checklist' && p.problemCount > 0 && (
               <span className="rounded-md border border-red-300 px-1.5 text-[11px] font-semibold text-red-600">
                 {n(p.problemCount)}
               </span>
             )}
+            {p.steps[i] && <IconCheck className="h-3.5 w-3.5 text-brand" />}
             {href === 'files' && p.fileCount > 0 && (
               <span className="text-xs text-neutral-400">{n(p.fileCount)}</span>
             )}

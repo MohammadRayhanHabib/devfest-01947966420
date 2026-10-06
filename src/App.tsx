@@ -31,9 +31,9 @@ const MAX_BYTES = 50 * 1024 * 1024
 
 function readLang(): Lang {
   try {
-    return localStorage.getItem('lang') === 'en' ? 'en' : 'bn'
+    return localStorage.getItem('lang') === 'bn' ? 'bn' : 'en' // English by default
   } catch {
-    return 'bn'
+    return 'en'
   }
 }
 
@@ -87,6 +87,7 @@ function App() {
   const [autoCount, setAutoCount] = useState<number | null>(null)
   const [made, setMade] = useState(false) // package downloaded at least once (step 4 done)
   const [withIndex, setWithIndex] = useState(true)
+  const [bannerHiddenAt, setBannerHiddenAt] = useState<number | null>(null) // closed until the problem count changes
   const [seal, setSeal] = useState<{ name: string; bytes: ArrayBuffer } | null>(null)
   const [sealPages, setSealPages] = useState('1')
   const [sealError, setSealError] = useState(false)
@@ -217,7 +218,13 @@ function App() {
         bad.push({ name: f.name, reason: check.reason === 'not_pdf' ? 'notPdf' : check.reason })
         continue
       }
-      added.push({ id: crypto.randomUUID(), name: f.name, size: f.size, pages: check.pages, hash: await sha256(bytes), bytes })
+      const hash = await sha256(bytes)
+      // The very same file (same name and content) added again is skipped, not shown as a duplicate.
+      if ([...files, ...added].some((x) => x.name === f.name && x.hash === hash)) {
+        bad.push({ name: f.name, reason: 'alreadyAdded' })
+        continue
+      }
+      added.push({ id: crypto.randomUUID(), name: f.name, size: f.size, pages: check.pages, hash, bytes })
       count++
       total += f.size
     }
@@ -372,12 +379,28 @@ function App() {
         }}
       />
       <div className="min-w-0 flex-1 lg:flex lg:h-screen lg:flex-col lg:gap-3 lg:py-3 lg:pr-3">
-        {data && problemCount > 0 && (
-          <div className="flex items-center justify-center gap-3 bg-amber-400 px-4 py-2.5 text-sm text-neutral-900 lg:rounded-xl">
-            <IconAlert className="h-4 w-4" />
-            <span className="font-medium">{t.bannerText(problemCount)}</span>
-            <button onClick={() => goTo('package')} className="rounded-lg bg-neutral-900 px-3 py-1 text-xs font-semibold text-white">
+        {data && problemCount > 0 && bannerHiddenAt !== problemCount && (
+          // Evernote-style top bar: bold count, short hint, dark action button, close on the right.
+          <div
+            role="status"
+            className="relative mx-4 mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-lg bg-amber-400 py-2.5 pl-4 pr-10 text-sm text-neutral-900 lg:mx-0 lg:mt-0"
+          >
+            <IconAlert className="h-4 w-4 shrink-0" />
+            <p>
+              <span className="font-bold">{t.bannerBold(problemCount)}</span> {t.bannerRest}
+            </p>
+            <button
+              onClick={() => goTo('package')}
+              className="rounded-md bg-neutral-900 px-3 py-1 text-xs font-semibold text-white hover:bg-black"
+            >
               {t.bannerAction}
+            </button>
+            <button
+              onClick={() => setBannerHiddenAt(problemCount)}
+              aria-label={t.dismiss}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-neutral-700 hover:bg-amber-300"
+            >
+              <IconX className="h-4 w-4" />
             </button>
           </div>
         )}
@@ -404,7 +427,7 @@ function App() {
               </div>
               <button
                 onClick={openJson}
-                className="mt-8 rounded-xl bg-brand px-8 py-3 text-[15px] font-semibold text-white shadow-sm hover:bg-brand-dark"
+                className="mt-8 rounded-lg bg-accent px-10 py-3 text-[15px] font-semibold text-white shadow-sm hover:bg-accent-dark"
               >
                 {t.loadButton}
               </button>
@@ -416,11 +439,11 @@ function App() {
               <StepBlock n={1} lang={lang} done={steps[0]} active={current === 0}>
                 <TenderCard t={t} tender={data.tender} onLoadAnother={openJson} />
                 <p className="mt-3 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
-                  <span className="grid h-6 w-6 place-items-center rounded-md bg-sky-200 text-sky-900">
+                  <span className="grid h-6 w-6 place-items-center rounded-md bg-neutral-100 text-neutral-500">
                     <IconSave className="h-3.5 w-3.5" />
                   </span>
                   {t.savedNote}
-                  <button onClick={startOver} className="font-medium text-brand underline">
+                  <button onClick={startOver} className="font-medium text-accent underline">
                     {t.startOver}
                   </button>
                 </p>
@@ -433,14 +456,16 @@ function App() {
                 <div className="mb-4 flex flex-wrap items-center gap-3">
                   <button
                     onClick={autoMatch}
-                    className="inline-flex items-center gap-2 rounded-xl border border-brand py-1.5 pl-1.5 pr-4 text-sm font-semibold text-brand hover:bg-brand/5"
+                    className="inline-flex items-center gap-2 rounded-xl border border-accent py-1.5 pl-1.5 pr-4 text-sm font-semibold text-accent hover:bg-accent/5"
                   >
-                    <span className="grid h-7 w-7 place-items-center rounded-lg bg-amber-300 text-amber-900">
+                    <span className="grid h-7 w-7 place-items-center rounded-lg bg-violet-100 text-violet-600">
                       <IconSparkle className="h-4 w-4" />
                     </span>
                     {t.autoMatch}
                   </button>
-                  {autoCount !== null && <span className="text-sm text-neutral-600">{t.autoMatched(autoCount)}</span>}
+                  {autoCount !== null && (
+                    <span className="text-sm text-neutral-600">{autoCount ? t.autoMatched(autoCount) : t.autoNone}</span>
+                  )}
                 </div>
               )}
               <ChecklistTable
@@ -464,7 +489,7 @@ function App() {
                       type="checkbox"
                       checked={withIndex}
                       onChange={(e) => setWithIndex(e.target.checked)}
-                      className="h-4 w-4 accent-brand"
+                      className="h-4 w-4 accent-accent"
                     />
                     {t.indexOption}
                   </label>

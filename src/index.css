@@ -3,8 +3,10 @@
 
 @theme {
   --font-sans: 'Inter', 'Anek Bangla', ui-sans-serif, system-ui, sans-serif;
-  --color-brand: #4d5ef6;
-  --color-brand-dark: #3f4fe0;
+  --color-brand: #00a82d;
+  --color-brand-dark: #00902a;
+  --color-accent: #4a5bf2;
+  --color-accent-dark: #3b4ae0;
 }
 
 html {

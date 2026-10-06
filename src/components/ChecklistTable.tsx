@@ -29,7 +29,7 @@ export default function ChecklistTable(p: Props) {
       value={p.matches[r.id] ?? ''}
       onChange={(e) => p.onMatch(r.id, e.target.value)}
       aria-label={`${t.colFile}: ${name(r)}`}
-      className="w-full rounded-lg border border-neutral-300 bg-white px-2 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20 lg:max-w-56 lg:py-1.5"
+      className="w-full rounded-lg border border-neutral-300 bg-white px-2 py-2 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 lg:max-w-56 lg:py-1.5"
     >
       <option value="">{t.chooseFile}</option>
       {p.files.map((f) => {
@@ -53,7 +53,7 @@ export default function ChecklistTable(p: Props) {
         value={p.expiry[r.id] ?? ''}
         onChange={(e) => p.onExpiry(r.id, e.target.value)}
         aria-label={`${t.colExpiry}: ${name(r)}`}
-        className={`w-full rounded-lg border px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/20 lg:w-auto ${
+        className={`w-full rounded-lg border px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 lg:w-auto ${
           p.statuses[r.id] === 'expiry_needed' ? 'border-amber-400 bg-amber-50' : 'border-neutral-300'
         }`}
       />
@@ -63,7 +63,9 @@ export default function ChecklistTable(p: Props) {
 
   return (
     <section id="checklist" className="scroll-mt-20">
-      <h2 className="text-lg font-semibold text-neutral-900">{t.checklistTitle}</h2>
+      <h2 className="text-lg font-semibold text-neutral-900">
+        {t.checklistTitle} <span className="text-sm font-normal text-neutral-400">{lang === 'bn' ? toBn(p.reqs.length) : p.reqs.length}</span>
+      </h2>
       <p className="mt-1 text-sm text-neutral-600">{t.checklistDesc}</p>
 
       {/* Mobile: app-style cards */}
@@ -74,7 +76,7 @@ export default function ChecklistTable(p: Props) {
               <div className="min-w-0">
                 <p className="text-xs text-neutral-500">
                   #{lang === 'bn' ? toBn(r.order) : r.order} ·{' '}
-                  <span className={r.mandatory ? 'text-red-700' : ''}>{r.mandatory ? t.mandatory : t.optional}</span>
+                  <span className={r.mandatory ? 'text-neutral-700' : ''}>{r.mandatory ? t.mandatory : t.optional}</span>
                 </p>
                 <p className="font-semibold leading-snug text-neutral-900">{name(r)}</p>
               </div>
@@ -96,7 +98,7 @@ export default function ChecklistTable(p: Props) {
       {/* Desktop: table */}
       <div className="mt-4 hidden overflow-x-auto rounded-xl border border-neutral-200 lg:block">
         <table className="w-full min-w-[600px] text-left text-sm">
-          <thead className="bg-neutral-50 text-xs font-medium text-neutral-500">
+          <thead className="bg-neutral-100 text-xs font-medium text-neutral-600">
             <tr>
               <th className="w-10 px-3 py-2.5">{t.colNo}</th>
               <th className="px-3 py-2.5">{t.colDoc}</th>
@@ -111,7 +113,7 @@ export default function ChecklistTable(p: Props) {
                 <td className="px-3 py-3 text-neutral-500">{lang === 'bn' ? toBn(r.order) : r.order}</td>
                 <td className="px-3 py-3">
                   <div className="font-medium text-neutral-900">{name(r)}</div>
-                  <div className={`text-xs ${r.mandatory ? 'text-red-700' : 'text-neutral-500'}`}>
+                  <div className={`text-xs ${r.mandatory ? 'text-neutral-600' : 'text-neutral-400'}`}>
                     {r.mandatory ? t.mandatory : t.optional}
                   </div>
                 </td>

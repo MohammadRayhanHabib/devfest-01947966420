@@ -36,10 +36,10 @@ export default function UploadPanel(p: Props) {
           p.onFiles(Array.from(e.dataTransfer.files))
         }}
         className={`mt-3 flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed px-4 py-4 text-center transition sm:flex-row sm:text-left ${
-          over ? 'border-brand bg-brand/5' : 'border-neutral-300 bg-[#f7f7f5]'
+          over ? 'border-accent bg-accent/5' : 'border-neutral-300 bg-[#f7f7f5]'
         }`}
       >
-        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-white text-brand shadow-sm">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-pink-100 text-pink-700">
           <IconUpload className="h-5 w-5" />
         </span>
         <div className="flex-1">
@@ -49,7 +49,7 @@ export default function UploadPanel(p: Props) {
         <button
           onClick={() => input.current?.click()}
           disabled={p.busy}
-          className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-dark disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 shadow-sm hover:bg-neutral-50 disabled:opacity-50"
         >
           <IconUpload />
           {t.selectFiles}

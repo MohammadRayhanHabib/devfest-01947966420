@@ -17,7 +17,7 @@ export default function StepBlock({ n, lang, done, active, last, children }: Pro
     <div className="relative pl-11 sm:pl-14">
       <span
         className={`absolute left-0 top-0 z-[1] grid h-8 w-8 place-items-center rounded-full text-sm font-bold sm:h-9 sm:w-9 ${
-          done ? 'bg-emerald-500 text-white' : active ? 'bg-brand text-white ring-4 ring-brand/15' : 'bg-neutral-200 text-neutral-500'
+          done ? 'bg-brand text-white' : active ? 'bg-accent text-white ring-4 ring-accent/15' : 'bg-neutral-200 text-neutral-500'
         }`}
         aria-hidden="true"
       >

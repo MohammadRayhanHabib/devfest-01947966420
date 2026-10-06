@@ -195,8 +195,15 @@ function drawDocList(
   y -= 6
   page.drawLine({ start: { x: m, y }, end: { x: width - m, y }, thickness: 0.6, color: rgb(0.8, 0.83, 0.87) })
   y -= 14
-  const size = rows.length > 20 ? baseSize - 1 : baseSize
-  const step = rows.length > 20 ? size + 4 : size + 7
+  // Keep every row on the page: drop the Bangla second line if it won't fit, then tighten the rows.
+  const room = y - 50 // stay above the footer
+  let size = rows.length > 20 ? baseSize - 1 : baseSize
+  let step = rows.length > 20 ? size + 4 : size + 7
+  if (bn.some(Boolean) && rows.length * (step + size + 7) > room) bn = []
+  if (rows.length * step > room) {
+    step = Math.max(8, room / rows.length)
+    size = Math.min(size, step - 1)
+  }
   rows.forEach((r, i) => {
     page.drawText(String(i + 1), { x: cols.no, y, size, font, color: text })
     const lines = wrap(r.title, font, size, cols.pages - cols.title - 24)

@@ -9,7 +9,7 @@ A frontend-only web app that helps office staff turn a set of tender PDFs into *
 - **Registration No:** 01947966420
 
 ## Live Link
-**https://LIVE-LINK-HERE**
+**https://devfest-01947966420.vercel.app**
 
 ## How to Run
 Requires Node.js 20+ and pnpm.

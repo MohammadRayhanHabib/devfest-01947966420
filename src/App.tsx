@@ -151,10 +151,10 @@ function App() {
   const statuses = useMemo(() => {
     const out: Record<string, Status> = {}
     for (const r of reqs) {
-      out[r.id] = computeStatus(r, Boolean(matches[r.id]), expiry[r.id], data?.tender.submission_deadline ?? '')
+      out[r.id] = computeStatus(r, Boolean(matches[r.id] && fileById.has(matches[r.id])), expiry[r.id], data?.tender.submission_deadline ?? '')
     }
     return out
-  }, [reqs, matches, expiry, data])
+  }, [reqs, matches, expiry, data, fileById])
 
   const title = (id: string) => {
     const r = reqs.find((x) => x.id === id)

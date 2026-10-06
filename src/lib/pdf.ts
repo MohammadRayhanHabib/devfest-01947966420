@@ -1,2 +1,188 @@
-// pdf helpers
-export {}
+import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from 'pdf-lib'
+import type { Requirement, Tender, UploadedFile } from '../types'
+
+export type PdfCheck =
+  | { ok: true; pages: number }
+  | { ok: false; reason: 'not_pdf' | 'password' | 'damaged' }
+
+// Checks that the bytes are a real, readable PDF and counts its pages.
+export async function inspectPdf(bytes: ArrayBuffer): Promise<PdfCheck> {
+  const head = new TextDecoder('latin1').decode(bytes.slice(0, 1024))
+  if (!head.includes('%PDF-')) return { ok: false, reason: 'not_pdf' }
+  try {
+    const doc = await PDFDocument.load(bytes, { throwOnInvalidObject: true })
+    const pages = doc.getPageCount()
+    return pages > 0 ? { ok: true, pages } : { ok: false, reason: 'damaged' }
+  } catch (e) {
+    const name = (e as { name?: string; constructor?: { name?: string } })?.constructor?.name ?? ''
+    const msg = String((e as Error)?.message ?? '')
+    if (name.includes('Encrypted') || /encrypt/i.test(msg)) return { ok: false, reason: 'password' }
+    return { ok: false, reason: 'damaged' }
+  }
+}
+
+export interface PackageItem {
+  req: Requirement
+  file: UploadedFile
+}
+
+const FOOTER_H = 28 // extra strip added under every document page, so the footer never covers content
+
+// Standard PDF fonts only support Latin characters, so swap anything else for a safe character.
+function safe(text: string): string {
+  return text
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[–—]/g, '-')
+    .replace(/[^\x20-\x7E -ÿ]/g, '?')
+}
+
+function wrap(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
+  const lines: string[] = []
+  let line = ''
+  for (const word of safe(text).split(/\s+/)) {
+    const next = line ? `${line} ${word}` : word
+    if (font.widthOfTextAtSize(next, size) <= maxWidth || !line) line = next
+    else {
+      lines.push(line)
+      line = word
+    }
+  }
+  if (line) lines.push(line)
+  return lines
+}
+
+function rotationOf(page: PDFPage): number {
+  return ((page.getRotation().angle % 360) + 360) % 360
+}
+
+// Grows the page by FOOTER_H on its visible bottom edge (respecting page rotation).
+function addFooterSpace(page: PDFPage) {
+  const b = page.getCropBox()
+  const m = page.getMediaBox()
+  let box = { x: b.x, y: b.y - FOOTER_H, width: b.width, height: b.height + FOOTER_H }
+  const rot = rotationOf(page)
+  if (rot === 90) box = { x: b.x, y: b.y, width: b.width + FOOTER_H, height: b.height }
+  if (rot === 180) box = { x: b.x, y: b.y, width: b.width, height: b.height + FOOTER_H }
+  if (rot === 270) box = { x: b.x - FOOTER_H, y: b.y, width: b.width + FOOTER_H, height: b.height }
+  const x1 = Math.min(m.x, box.x)
+  const y1 = Math.min(m.y, box.y)
+  const x2 = Math.max(m.x + m.width, box.x + box.width)
+  const y2 = Math.max(m.y + m.height, box.y + box.height)
+  page.setMediaBox(x1, y1, x2 - x1, y2 - y1)
+  page.setCropBox(box.x, box.y, box.width, box.height)
+}
+
+// Draws "<tender_id> | Page X of Y" centred on the visible bottom edge.
+function drawFooter(page: PDFPage, text: string, font: PDFFont) {
+  const size = 9
+  const color = rgb(0.25, 0.29, 0.35)
+  const w = font.widthOfTextAtSize(text, size)
+  const b = page.getCropBox()
+  const rot = rotationOf(page)
+  if (rot === 90) {
+    page.drawText(text, { x: b.x + b.width - 10, y: b.y + b.height / 2 - w / 2, size, font, color, rotate: degrees(90) })
+  } else if (rot === 180) {
+    page.drawText(text, { x: b.x + b.width / 2 + w / 2, y: b.y + b.height - 10, size, font, color, rotate: degrees(180) })
+  } else if (rot === 270) {
+    page.drawText(text, { x: b.x + 10, y: b.y + b.height / 2 + w / 2, size, font, color, rotate: degrees(270) })
+  } else {
+    page.drawText(text, { x: b.x + b.width / 2 - w / 2, y: b.y + 10, size, font, color })
+  }
+}
+
+function today(): string {
+  return new Date().toLocaleDateString('en-CA') // YYYY-MM-DD
+}
+
+function drawCover(
+  page: PDFPage,
+  tender: Tender,
+  rows: { order: number; title: string; pages: number; start: number }[],
+  font: PDFFont,
+  bold: PDFFont,
+) {
+  const { width, height } = page.getSize()
+  const m = 56
+  const dark = rgb(0.06, 0.2, 0.3)
+  const text = rgb(0.12, 0.14, 0.17)
+  const muted = rgb(0.4, 0.44, 0.5)
+
+  page.drawRectangle({ x: 0, y: height - 120, width, height: 120, color: dark })
+  page.drawText('TENDER SUBMISSION PACKAGE', { x: m, y: height - 62, size: 20, font: bold, color: rgb(1, 1, 1) })
+  page.drawText(safe(`${tender.tender_id} - ${tender.title}`).slice(0, 80), {
+    x: m, y: height - 90, size: 11, font, color: rgb(0.8, 0.87, 0.93),
+  })
+
+  let y = height - 160
+  const details: [string, string][] = [
+    ['Tender ID', tender.tender_id],
+    ['Tender Title', tender.title],
+    ['Procuring Entity', tender.procuring_entity],
+    ['Bidder', tender.bidder],
+    ['Submission Deadline', tender.submission_deadline],
+    ['Package Created', today()],
+  ]
+  for (const [label, value] of details) {
+    page.drawText(label, { x: m, y, size: 10, font: bold, color: muted })
+    for (const line of wrap(value, font, 11, width - m * 2 - 140)) {
+      page.drawText(line, { x: m + 140, y, size: 11, font, color: text })
+      y -= 15
+    }
+    y -= 5
+  }
+
+  y -= 14
+  page.drawText('Included Documents', { x: m, y, size: 13, font: bold, color: dark })
+  y -= 22
+  const cols = { no: m, title: m + 30, pages: width - m - 110, start: width - m - 50 }
+  page.drawText('No.', { x: cols.no, y, size: 9, font: bold, color: muted })
+  page.drawText('Document', { x: cols.title, y, size: 9, font: bold, color: muted })
+  page.drawText('Pages', { x: cols.pages, y, size: 9, font: bold, color: muted })
+  page.drawText('Starts on', { x: cols.start, y, size: 9, font: bold, color: muted })
+  y -= 6
+  page.drawLine({ start: { x: m, y }, end: { x: width - m, y }, thickness: 0.6, color: rgb(0.8, 0.83, 0.87) })
+  y -= 14
+  const size = rows.length > 20 ? 9 : 10
+  const step = rows.length > 20 ? 13 : 16
+  rows.forEach((r, i) => {
+    page.drawText(String(i + 1), { x: cols.no, y, size, font, color: text })
+    const title = wrap(r.title, font, size, cols.pages - cols.title - 10)[0]
+    page.drawText(title, { x: cols.title, y, size, font, color: text })
+    page.drawText(String(r.pages), { x: cols.pages, y, size, font, color: text })
+    page.drawText(`Page ${r.start}`, { x: cols.start, y, size, font, color: text })
+    y -= step
+  })
+}
+
+// Builds the final package: cover page, then documents sorted by order, then a footer on every page.
+export async function buildPackage(tender: Tender, items: PackageItem[]): Promise<Uint8Array> {
+  const sorted = [...items].sort((a, b) => a.req.order - b.req.order)
+  const out = await PDFDocument.create()
+  out.setTitle(`${tender.tender_id} Package`)
+  const font = await out.embedFont(StandardFonts.Helvetica)
+  const bold = await out.embedFont(StandardFonts.HelveticaBold)
+
+  let start = 2 // page 1 is the cover
+  const rows = sorted.map((it) => {
+    const row = { order: it.req.order, title: it.req.title_en, pages: it.file.pages, start }
+    start += it.file.pages
+    return row
+  })
+
+  const cover = out.addPage([595.28, 841.89])
+  drawCover(cover, tender, rows, font, bold)
+
+  for (const it of sorted) {
+    const src = await PDFDocument.load(it.file.bytes)
+    const copied = await out.copyPages(src, src.getPageIndices())
+    for (const p of copied) {
+      addFooterSpace(p)
+      out.addPage(p)
+    }
+  }
+
+  const total = out.getPageCount()
+  out.getPages().forEach((p, i) => drawFooter(p, `${safe(tender.tender_id)} | Page ${i + 1} of ${total}`, font))
+  return out.save()
+}
